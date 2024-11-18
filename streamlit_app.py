@@ -1,151 +1,146 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# Apply modern theme
+sns.set_theme(style="whitegrid", palette="pastel")
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
-
+# Load data
 @st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+def load_data():
+    return pd.read_csv('bank01_baranda_revised.csv')
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+data = load_data()
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+# Title and Introduction
+st.title("Bank Data Interactive Dashboard")
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+# Introduction Section
+st.header("Introduction")
+st.write("""
+This dashboard explores bank customer data to address the following key objectives:
+- **Predict New Sales**: Identify customer behaviors and trends to estimate potential new purchases.
+- **Customer Segmentation**: Analyze customer profiles to group individuals with similar characteristics.
+- **Customer Retention**: Identify at-risk customers and suggest strategies for retention.
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+Our interactive dashboard provides data exploration, insights, and recommendations that will help inform decision-making.
+""")
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+# Sidebar Filters
+st.sidebar.header("Filters")
 
-    return gdp_df
+# Gender Filter
+gender = st.sidebar.selectbox('Select Gender', ['All', 'Male', 'Female'], key='gender_filter')
+filtered_data = data.copy()
+if gender != 'All':
+    filtered_data = filtered_data[filtered_data[f'demog_gen{gender[0].lower()}'] == 'yes']
 
-gdp_df = get_gdp_data()
+# Age Filter
+age_range = st.sidebar.slider('Select Age Range', 
+                               int(filtered_data['demog_age'].min()), 
+                               int(filtered_data['demog_age'].max()), 
+                               (20, 30),  # Default range: 20 to 30
+                               key='age_slider')
+filtered_data = filtered_data[(filtered_data['demog_age'] >= age_range[0]) & 
+                              (filtered_data['demog_age'] <= age_range[1])]
 
-# -----------------------------------------------------------------------------
-# Draw the actual page
+# New Sales (INT_TGT) Filter
+sales_min = int(data['int_tgt'].min())
+sales_max = int(data['int_tgt'].max())
+sales_range = st.sidebar.slider("Filter by New Sales (INT_TGT) Range", 
+                                 sales_min,  # Minimum value dynamically set
+                                 sales_max,  # Maximum value dynamically set
+                                 (sales_min, sales_max),  # Slider defaults to full range
+                                 key='sales_slider')
+filtered_data = filtered_data[(filtered_data['int_tgt'] >= sales_range[0]) & 
+                              (filtered_data['int_tgt'] <= sales_range[1])]
 
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
+# Metric Display
+st.header("Metrics Overview")
+st.metric(label="Filtered Average Sales", value=f"${filtered_data['int_tgt'].mean():,.2f}")
+st.metric(label="Filtered Total Sales", value=f"${filtered_data['int_tgt'].sum():,.2f}")
+st.metric(label="Median Age of Customers", value=f"{filtered_data['demog_age'].median()} years")
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
+# Tabs for Data Exploration, Insights, and Recommendations
+tab1, tab2, tab3, tab4 = st.tabs(["Data Exploration", "Predictive Insights", "Insights", "Recommendations"])
 
-# Add some spacing
-''
-''
+with tab1:
+    st.subheader("Data Exploration")
 
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
+    # Univariate Analysis: Distribution of Sales
+    st.write("### Univariate Analysis: Distribution of New Sales (INT_TGT)")
+    fig1, ax1 = plt.subplots(figsize=(8, 5))
+    sns.histplot(filtered_data['int_tgt'], kde=True, ax=ax1, color='blue')
+    ax1.set_title("Distribution of New Sales", fontsize=14)
+    ax1.set_xlabel("New Sales (INT_TGT)", fontsize=12)
+    ax1.set_ylabel("Frequency", fontsize=12)
+    st.pyplot(fig1)
 
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
+    # Bivariate Analysis: Scatter Plot
+    st.write("### Bivariate Analysis: Sales vs. Age")
+    fig2, ax2 = plt.subplots(figsize=(8, 5))
+    sns.scatterplot(x='demog_age', y='int_tgt', data=filtered_data, ax=ax2, color='green')
+    ax2.set_title("Sales vs. Age", fontsize=14)
+    ax2.set_xlabel("Age", fontsize=12)
+    ax2.set_ylabel("New Sales (INT_TGT)", fontsize=12)
+    st.pyplot(fig2)
 
-countries = gdp_df['Country Code'].unique()
+    # Multivariate Analysis: Heatmap
+    st.write("### Multivariate Analysis: Correlation Heatmap")
+    # Select only numeric columns for correlation
+    numeric_columns = filtered_data.select_dtypes(include=['float64', 'int64'])
+    corr_matrix = numeric_columns.corr()
+    fig3, ax3 = plt.subplots(figsize=(8, 5))
+    sns.heatmap(corr_matrix, annot=False, cmap="coolwarm", ax=ax3)
+    ax3.set_title("Correlation Heatmap", fontsize=14)
+    st.pyplot(fig3)
 
-if not len(countries):
-    st.warning("Select at least one country")
+with tab2:
+    st.subheader("Predictive Insights")
+    input_sales = st.number_input("Enter Average Sales (RFM1):", min_value=0.0, value=50.0, step=1.0, key='predict_sales')
+    predicted_sales = input_sales * 1.2  # Hypothetical multiplier for prediction
+    st.write(f"Predicted New Sales: **${predicted_sales:.2f}**")
+    
+    st.write("""
+    Use this tool to estimate sales based on historical averages. 
+    Increase the predictive multiplier by analyzing past promotion impact.
+    """)
 
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
+with tab3:
+    st.subheader("Insights")
+    st.write("""
+    Key findings from the analysis:
+    - **Age Group Insights**: Younger customers (20-30 years) tend to have higher average new sales.
+    - **Sales Correlations**: New Sales (INT_TGT) correlate strongly with promotional responsiveness.
+    - **Customer Segmentation**: Female customers exhibit slightly higher average sales in specific segments.
+    """)
 
-''
-''
-''
+    # Supporting Visualization: Box Plot by Gender
+    st.write("### Supporting Insight: Sales by Gender")
+    fig4, ax4 = plt.subplots(figsize=(8, 5))
+    sns.boxplot(x='int_tgt', y='demog_genf', data=filtered_data, ax=ax4, palette='Set2')
+    ax4.set_title("Sales by Gender (Female)", fontsize=14)
+    ax4.set_xlabel("New Sales (INT_TGT)", fontsize=12)
+    ax4.set_ylabel("Gender (Female)", fontsize=12)
+    st.pyplot(fig4)
 
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
+with tab4:
+    st.subheader("Recommendations")
+    st.write("""
+    Based on the analysis, here are some actionable insights:
+    - **Target Younger Customers**: Develop tailored campaigns for customers aged 20-30 to maximize sales potential.
+    - **Focus on Promotions**: High responsiveness to promotions suggests that marketing campaigns can drive significant growth.
+    - **Retain High-Value Customers**: Monitor customers with decreasing engagement and provide personalized offers to encourage loyalty.
+    """)
 
-st.header('GDP over time', divider='gray')
+# Download Filtered Data
+@st.cache_data
+def convert_df_to_csv(df):
+    return df.to_csv(index=False).encode('utf-8')
 
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+csv_data = convert_df_to_csv(filtered_data)
+st.download_button(label="Download Filtered Data as CSV", 
+                   data=csv_data, 
+                   file_name='filtered_data.csv', 
+                   mime='text/csv')
